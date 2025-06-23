@@ -424,43 +424,51 @@ run_with_wallet() {
         echo -n "Enter your Wallet Address: "
         read -r wallet_address
         
-        if [ -z "\$wallet_address" ]; then
+        if [ -z "$wallet_address" ]; then
             echo -e "${RED}❌ Wallet Address cannot be empty. Please try again.${NC}"
             continue
         fi
         
-        if ! validate_wallet_address "\$wallet_address"; then
+        if ! validate_wallet_address "$wallet_address"; then
             echo -e "${RED}❌ Invalid wallet address format. Please try again.${NC}"
             continue
         fi
         
-        echo -e "${YELLOW}Wallet Address: ${GREEN}\$wallet_address${NC}"
+        echo -e "${YELLOW}Wallet Address: ${GREEN}$wallet_address${NC}"
         echo -n "Is this correct? (y/n): "
         read -r confirm
         
-        if [[ "\$confirm" =~ ^[Yy]$ ]]; then
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
             break
         fi
     done
 
-    echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}\$wallet_address${NC}"
-    if ! nexus-network register-user --wallet-address "\$wallet_address"; then
+    echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}$wallet_address${NC}"
+    if ! nexus-network register-user --wallet-address "$wallet_address"; then
         echo -e "${RED}❌ Failed to register user. Please check your wallet address.${NC}"
         return 1
     fi
 
     echo -e "\n${BLUE}INFO:${NC} Registering new node...${NC}"
-    if ! nexus-network register-node; then
+    # Menangkap output Node ID dari perintah register-node. Pastikan perintah ini mengeluarkan Node ID.
+    local NODE_ID
+    NODE_ID=$(nexus-network register-node 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$NODE_ID" ]; then
         echo -e "${RED}❌ Failed to register node.${NC}"
         return 1
     fi
 
-    echo -e "\n${YELLOW}IMPORTANT:${NC} Registration complete. Please note your Node ID carefully."
-    echo -e "You will need it for future automatic starts."
-    echo -e "After obtaining your Node ID, run this container again and select option 2 ('Run with Node ID') to save it for automatic starts."
-    echo -e "Press Enter to return to the main menu."
-    read -r
-    return 0
+    # Simpan Node ID ke penyimpanan persisten
+    mkdir -p "$NODE_ID_PERSIST_DIR"
+    echo -n "$NODE_ID" > "$NODE_ID_PERSIST_FILE"
+    echo -e "${GREEN}✅ Node registered successfully with ID: ${NODE_ID}${NC}"
+    sleep 1
+
+    echo -e "\n${BLUE}INFO:${NC} Starting node with Node ID: ${GREEN}$NODE_ID${NC}"
+    echo -e "${YELLOW}Node logs will be displayed below:${NC}"
+    echo "----------------------------------------"
+    
+    exec /usr/local/bin/nexus-network start --node-id "$NODE_ID"
 }
 
 run_with_node_id() {
