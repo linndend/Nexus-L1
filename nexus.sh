@@ -123,11 +123,94 @@ fi
 log_info "Upgrading existing packages..."
 sudo apt-get upgrade -y
 
-log_info "Installing required dependencies..."
-# Install packages one by one to identify which one might be causing issues
-PACKAGES=("curl" "ca-certificates" "docker.io" "libssl-dev" "build-essential")
+# Fix Docker installation conflicts
+fix_docker_conflicts() {
+    log_info "Checking for Docker-related package conflicts..."
+    
+    # Remove conflicting packages if they exist
+    local conflicting_packages=("containerd" "containerd.io" "docker" "docker-engine" "docker.io" "docker-ce" "docker-ce-cli")
+    
+    for pkg in "${conflicting_packages[@]}"; do
+        if dpkg -l | grep -q "^ii.*$pkg "; then
+            log_warn "Removing conflicting package: $pkg"
+            sudo apt-get remove -y "$pkg" || true
+        fi
+    done
+    
+    # Clean up any remaining configuration files
+    sudo apt-get autoremove -y
+    sudo apt-get autoclean
+}
 
-for package in "${PACKAGES[@]}"; do
+install_docker_official() {
+    log_info "Installing Docker from official repository..."
+    
+    # Add Docker's official GPG key
+    sudo apt-get update
+    sudo apt-get install -y ca-certificates curl gnupg
+    sudo install -m 0755 -d /etc/apt/keyrings
+    
+    if ! curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null; then
+        log_warn "Failed to add Docker GPG key, trying alternative method..."
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+    fi
+    
+    # Add Docker repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Update package index
+    sudo apt-get update
+    
+    # Install Docker Engine
+    if sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+        log_success "Docker CE installed successfully"
+    else
+        log_error "Failed to install Docker CE"
+    fi
+}
+
+install_docker_snap() {
+    log_info "Installing Docker via Snap as fallback..."
+    if command -v snap >/dev/null 2>&1; then
+        sudo snap install docker
+        log_success "Docker installed via Snap"
+    else
+        log_error "Snap is not available, cannot install Docker"
+    fi
+}
+
+install_docker_ubuntu_repo() {
+    log_info "Trying to install Docker from Ubuntu repository with conflict resolution..."
+    
+    # First try to install without docker.io if there are conflicts
+    sudo apt-get install -y curl ca-certificates libssl-dev build-essential
+    
+    # Try different Docker installation methods
+    if sudo apt-get install -y docker.io; then
+        log_success "docker.io installed successfully"
+    else
+        log_warn "docker.io installation failed, trying conflict resolution..."
+        
+        # Try to resolve conflicts
+        fix_docker_conflicts
+        
+        # Try again
+        if sudo apt-get install -y docker.io; then
+            log_success "docker.io installed after conflict resolution"
+        else
+            log_warn "docker.io still failing, trying official Docker repository..."
+            install_docker_official
+        fi
+    fi
+}
+
+log_info "Installing required dependencies..."
+
+# Install non-Docker packages first
+BASIC_PACKAGES=("curl" "ca-certificates" "libssl-dev" "build-essential")
+
+for package in "${BASIC_PACKAGES[@]}"; do
     log_info "Installing $package..."
     if sudo apt-get install -y "$package"; then
         log_success "$package installation completed"
@@ -136,10 +219,29 @@ for package in "${PACKAGES[@]}"; do
     fi
 done
 
+# Handle Docker installation separately due to potential conflicts
+log_info "Installing Docker..."
+if command -v docker >/dev/null 2>&1; then
+    log_warn "Docker is already installed, skipping Docker installation"
+else
+    # Try Ubuntu repository first, then official repo as fallback
+    install_docker_ubuntu_repo
+fi
+
 # Verify Docker installation and start service
 log_info "Starting and enabling Docker service..."
-sudo systemctl start docker
-sudo systemctl enable docker
+if sudo systemctl start docker && sudo systemctl enable docker; then
+    log_success "Docker service started and enabled"
+else
+    log_warn "Failed to start Docker service, trying alternative method..."
+    
+    # If systemctl fails, try with snap docker
+    if command -v snap >/dev/null 2>&1 && snap list | grep -q docker; then
+        log_info "Using Snap Docker, no systemctl needed"
+    else
+        log_error "Cannot start Docker service"
+    fi
+fi
 
 # Add current user to docker group (if not root)
 if [ "$EUID" -ne 0 ]; then
