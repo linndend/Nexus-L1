@@ -149,7 +149,7 @@ while true; do
 done
 EOF
 
-chmod +x /tmp/entrypoint_fixed.sh
+chmod +x /tmp/entrypoint.sh
 
 # 3. Rebuild container with fixed entrypoint
 echo -e "\n${YELLOW}3. Rebuilding container with fixed entrypoint...${NC}"
