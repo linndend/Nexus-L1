@@ -573,7 +573,6 @@ echo -e "${YELLOW}Setelah input valid, node akan langsung dimulai dan menampilka
 echo -e "${YELLOW}Jika Node ID sudah tersimpan, node akan otomatis dimulai tanpa meminta input lagi.${NC}"
 echo "========================================================"
 
-# Run the container with the defined volume and name, without --rm
 docker run -it \
     --name "$CONTAINER_NAME" \
     -v "$VOLUME_NAME:${NODE_ID_PERSIST_DIR}" \
@@ -587,3 +586,6 @@ echo -e "Untuk menghentikan kontainer latar belakang: ${YELLOW}docker stop ${CON
 echo -e "Untuk menghapus data persisten (dan memulai dari awal): ${YELLOW}docker volume rm ${VOLUME_NAME}${NC}"
 echo
 echo "Log instalasi ini ada di: ${YELLOW}/tmp/nexus_install.log${NC}"
+
+sleep 10
+docker logs -f nexus-node-runner
