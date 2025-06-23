@@ -4,10 +4,10 @@ set -e
 
 # === Configuration Variables ===
 IMAGE_NAME="nexus-node"
-CONTAINER_NAME="nexus-node-runner" # Nama kontainer yang konsisten
-VOLUME_NAME="nexus_node_data"     # Nama volume untuk data persisten
-NODE_ID_PERSIST_DIR="/nexus_data" # Direktori di dalam kontainer untuk data persisten
-NODE_ID_PERSIST_FILE="${NODE_ID_PERSIST_DIR}/node_id.txt" # Lokasi file Node ID di dalam kontainer
+CONTAINER_NAME="nexus-node-runner"
+VOLUME_NAME="nexus_node_data"
+NODE_ID_PERSIST_DIR="/nexus_data"
+NODE_ID_PERSIST_FILE="${NODE_ID_PERSIST_DIR}/node_id.txt"
 
 # === Color Codes ===
 GREEN='\033[0;32m'
@@ -383,11 +383,12 @@ sleep 2
 show_menu() {
     clear
     echo -e "${BLUE}===================================${NC}"
-    echo -e "${YELLOW}      🚀 Nexus Node Runner 🚀     ${NC}"
+    echo -e "${YELLOW}      🚀 Nexus Node Runner 🚀    ${NC}"
+     echo -e "${YELLOW}          BY SPHERON TGE         ${NC}"
     echo -e "${BLUE}===================================${NC}"
     echo "Select mode to run the node:"
-    echo "  1) Run with Wallet Address (for new registration)"
-    echo "  2) Run with Node ID (if node is already registered)"
+    echo "  1) Run with Wallet Address (Use wallets new address)"
+    echo "  2) Run with Node ID (Use Node ID in web)"
     echo -e "${BLUE}-----------------------------------${NC}"
     echo -n "Select an option (1-2): "
 }
