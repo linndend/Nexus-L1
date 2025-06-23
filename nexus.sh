@@ -96,6 +96,7 @@ check_disk_space() {
 clear
 echo -e "${BLUE}==============================================${NC}"
 echo -e "${YELLOW}    🚀 Nexus Node Automatic Installer 🚀    ${NC}"
+echo -e "${YELLOW}          🚀 BY SPHERON WEN TGE 🚀          ${NC}"
 echo -e "${BLUE}==============================================${NC}"
 echo
 
