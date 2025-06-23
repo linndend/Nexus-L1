@@ -26,29 +26,14 @@ log_error() {
     exit 1
 }
 
-# Function display 
-spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='|/-\'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-    printf "    \b\b\b\b"
-}
+# Removed spinner() function
 
-run_with_spinner() {
+run_command() {
     local cmd="$1"
     local msg="$2"
     log_info "$msg"
-    ($cmd) &> /dev/null &
-    spinner $!
-    wait $!
-    if [ $? -eq 0 ]; then
+
+    if eval "$cmd" &> /dev/null; then
         log_success "${msg} completed."
     else
         log_error "Failed to run: ${msg}"
@@ -63,8 +48,8 @@ echo
 
 # --- 1. Dependency Installation ---
 echo -e "\n--- ${YELLOW}Step 1: System Dependency Installation${NC} ---"
-run_with_spinner "sudo apt-get update -y && sudo apt-get upgrade -y" "Updating package list"
-run_with_spinner "sudo apt-get install -y curl ca-certificates docker.io libssl-dev build-essential" "Installing curl, docker, and build-essential"
+run_command "sudo apt-get update -y && sudo apt-get upgrade -y" "Updating package list"
+run_command "sudo apt-get install -y curl ca-certificates docker.io libssl-dev build-essential" "Installing curl, docker, and build-essential"
 
 # --- 2. Nexus CLI Installation ---
 echo -e "\n--- ${YELLOW}Step 2: Nexus CLI Installation${NC} ---"
@@ -149,10 +134,10 @@ run_with_wallet() {
             echo -e "${RED}Wallet Address cannot be empty. Please try again.${NC}"
         fi
     done
-    
+
     echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}$wallet_address${NC}"
     nexus-network register-user --wallet-address "$wallet_address"
-    
+
     echo -e "\n${BLUE}INFO:${NC} Registering new node..."
     nexus-network register-node
 
@@ -203,8 +188,7 @@ log_success "entrypoint.sh script created successfully."
 
 # --- 4. Build Docker Image ---
 echo -e "\n--- ${YELLOW}Step 4: Build Docker Image${NC} ---"
-run_with_spinner "docker build -t nexus-node ." "Building 'nexus-node' image"
-
+run_command "docker build -t nexus-node ." "Building 'nexus-node' image"
 
 # --- 5. Done ---
 echo -e "\n${GREEN}======================================================${NC}"
