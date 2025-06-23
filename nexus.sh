@@ -14,7 +14,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # === Helper Functions ===
 log_info() {
@@ -34,7 +34,7 @@ log_error() {
     exit 1
 }
 
-# Modified run_command function with better error handling and output
+
 run_command() {
     local cmd="$1"
     local msg="$2"
@@ -43,7 +43,6 @@ run_command() {
     log_info "$msg"
     echo "Command: $cmd" >> "$log_file"
     
-    # Show progress and capture both stdout and stderr
     if eval "$cmd" 2>&1 | tee -a "$log_file"; then
         log_success "${msg} completed."
         return 0
@@ -68,7 +67,6 @@ check_sudo() {
     fi
 }
 
-# Function to check internet connectivity
 check_internet() {
     log_info "Checking internet connectivity..."
     if ping -c 1 google.com &> /dev/null || ping -c 1 8.8.8.8 &> /dev/null; then
@@ -78,9 +76,8 @@ check_internet() {
     fi
 }
 
-# Function to check available disk space
 check_disk_space() {
-    local required_space=2000000  # 2GB in KB
+    local required_space=2000000
     local available_space=$(df / | tail -1 | awk '{print $4}')
     
     if [ "$available_space" -lt "$required_space" ]; then
@@ -100,7 +97,6 @@ echo -e "${YELLOW}          🚀 BY SPHERON WEN TGE 🚀          ${NC}"
 echo -e "${BLUE}==============================================${NC}"
 echo
 
-# Pre-installation checks
 log_info "Performing pre-installation checks..."
 check_sudo
 check_internet
@@ -109,7 +105,6 @@ check_disk_space
 # --- 1. Dependency Installation ---
 echo -e "\n--- ${YELLOW}Step 1: System Dependency Installation${NC} ---"
 
-# Fix package cache and handle potential lock issues
 log_info "Checking for package manager locks..."
 if sudo lsof /var/lib/dpkg/lock-frontend &> /dev/null; then
     log_warn "Package manager is locked. Waiting for other package operations to complete..."
@@ -120,7 +115,6 @@ if sudo lsof /var/lib/dpkg/lock-frontend &> /dev/null; then
     echo
 fi
 
-# Update with more verbose output and better error handling
 log_info "Updating package repositories..."
 if ! sudo apt-get update -y; then
     log_warn "Initial update failed, trying to fix broken packages..."
@@ -132,11 +126,9 @@ fi
 log_info "Upgrading existing packages..."
 sudo apt-get upgrade -y
 
-# Fix Docker installation conflicts
 fix_docker_conflicts() {
     log_info "Checking for Docker-related package conflicts..."
     
-    # Remove conflicting packages if they exist
     local conflicting_packages=("containerd" "containerd.io" "docker" "docker-engine" "docker.io" "docker-ce" "docker-ce-cli")
     
     for pkg in "${conflicting_packages[@]}"; do
@@ -146,15 +138,14 @@ fix_docker_conflicts() {
         fi
     done
     
-    # Clean up any remaining configuration files
     sudo apt-get autoremove -y
     sudo apt-get autoclean
 }
 
+# installer docker
 install_docker_official() {
     log_info "Installing Docker from official repository..."
     
-    # Add Docker's official GPG key
     sudo apt-get update
     sudo apt-get install -y ca-certificates curl gnupg
     sudo install -m 0755 -d /etc/apt/keyrings
@@ -164,14 +155,11 @@ install_docker_official() {
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
         sudo chmod a+r /etc/apt/keyrings/docker.asc
     fi
-    
-    # Add Docker repository
+
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
     
-    # Update package index
     sudo apt-get update
     
-    # Install Docker Engine
     if sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
         log_success "Docker CE installed successfully"
     else
@@ -192,19 +180,15 @@ install_docker_snap() {
 install_docker_ubuntu_repo() {
     log_info "Trying to install Docker from Ubuntu repository with conflict resolution..."
     
-    # First try to install without docker.io if there are conflicts
     sudo apt-get install -y curl ca-certificates libssl-dev build-essential
     
-    # Try different Docker installation methods
     if sudo apt-get install -y docker.io; then
         log_success "docker.io installed successfully"
     else
         log_warn "docker.io installation failed, trying conflict resolution..."
         
-        # Try to resolve conflicts
         fix_docker_conflicts
         
-        # Try again
         if sudo apt-get install -y docker.io; then
             log_success "docker.io installed after conflict resolution"
         else
@@ -216,7 +200,6 @@ install_docker_ubuntu_repo() {
 
 log_info "Installing required dependencies..."
 
-# Install non-Docker packages first
 BASIC_PACKAGES=("curl" "ca-certificates" "libssl-dev" "build-essential")
 
 for package in "${BASIC_PACKAGES[@]}"; do
@@ -228,7 +211,6 @@ for package in "${BASIC_PACKAGES[@]}"; do
     fi
 done
 
-# Handle Docker installation separately due to potential conflicts
 log_info "Installing Docker..."
 if command -v docker >/dev/null 2>&1; then
     log_warn "Docker is already installed, skipping Docker installation"
@@ -236,14 +218,12 @@ else
     install_docker_ubuntu_repo
 fi
 
-# Verify Docker installation and start service
 log_info "Starting and enabling Docker service..."
 if sudo systemctl start docker && sudo systemctl enable docker; then
     log_success "Docker service started and enabled"
 else
     log_warn "Failed to start Docker service, trying alternative method..."
     
-    # If systemctl fails, try with snap docker
     if command -v snap >/dev/null 2>&1 && snap list | grep -q docker; then
         log_info "Using Snap Docker, no systemctl needed"
     else
@@ -251,7 +231,6 @@ else
     fi
 fi
 
-# Add current user to docker group (if not root)
 if [ "$EUID" -ne 0 ]; then
     sudo usermod -aG docker "$USER"
     log_warn "Added user to docker group. You may need to log out and back in for changes to take effect."
@@ -270,7 +249,6 @@ else
     
     log_info "Downloading and installing Nexus CLI..."
     
-    # Use more robust download with timeout and retry
     for attempt in {1..3}; do
         log_info "Download attempt $attempt/3..."
         if timeout 300 curl -sSfL --connect-timeout 30 --max-time 300 https://cli.nexus.xyz/ | sh; then
@@ -293,7 +271,7 @@ if [ ! -f "$CLI_PATH" ]; then
 fi
 
 chmod +x "$CLI_PATH"
-cd "$(dirname "$CLI_PATH")" # Change to ~/.nexus/bin for build context
+cd "$(dirname "$CLI_PATH")"
 
 # --- 3. Preparing Docker Environment ---
 echo -e "\n--- ${YELLOW}Step 3: Preparing Docker Environment${NC} ---"
@@ -314,12 +292,10 @@ COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /usr/local/bin/nexus-network /entrypoint.sh
 
-# Working directory
 WORKDIR /root
 
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Declare volume for persistent data
 VOLUME ${NODE_ID_PERSIST_DIR}
 EOF
 log_success "Dockerfile created successfully."
@@ -339,13 +315,11 @@ NC='\033[0m' # No Color
 NODE_ID_PERSIST_DIR="${NODE_ID_PERSIST_DIR}"
 NODE_ID_PERSIST_FILE="${NODE_ID_PERSIST_FILE}"
 
-# Function to handle container shutdown gracefully
 cleanup() {
     echo -e "\n${YELLOW}Shutting down node gracefully...${NC}"
     exit 0
 }
 
-# Trap signals for graceful shutdown
 trap cleanup SIGTERM SIGINT SIGQUIT
 
 # Ensure we have a proper TTY for interactive input
@@ -355,17 +329,14 @@ if [ ! -t 0 ]; then
     exit 1
 fi
 
-# Check if nexus-network binary exists
 if [ ! -f "/usr/local/bin/nexus-network" ]; then
     echo -e "${RED}❌ ERROR: nexus-network binary not found inside container!${NC}"
     echo "Please ensure the Docker image was built correctly."
     exit 1
 fi
 
-# Make sure binary is executable
 chmod +x /usr/local/bin/nexus-network
 
-# --- Automatic Start Logic ---
 if [ -f "\$NODE_ID_PERSIST_FILE" ] && [ -s "\$NODE_ID_PERSIST_FILE" ]; then # -s checks if file is not empty
     SAVED_NODE_ID=\$(cat "\$NODE_ID_PERSIST_FILE")
     echo -e "${GREEN}===============================================${NC}"
@@ -377,7 +348,6 @@ if [ -f "\$NODE_ID_PERSIST_FILE" ] && [ -s "\$NODE_ID_PERSIST_FILE" ]; then # -s
     exec /usr/local/bin/nexus-network start --node-id "\$SAVED_NODE_ID"
 fi
 
-# --- If no saved Node ID, show interactive setup ---
 echo -e "${YELLOW}⚠️ No saved Node ID found. Starting interactive setup...${NC}"
 sleep 2
 
@@ -455,7 +425,7 @@ run_with_wallet() {
         exit 1
     fi
 
-    # Simpan Node ID ke penyimpanan persisten
+    # Simpan Node ID ke penyimpanan
     mkdir -p "\$NODE_ID_PERSIST_DIR"
     echo -n "\$NODE_ID" > "\$NODE_ID_PERSIST_FILE"
     echo -e "${GREEN}✅ Node registered successfully with ID: \$NODE_ID${NC}"
@@ -495,7 +465,7 @@ run_with_node_id() {
         fi
     done
 
-    # Save the Node ID to persistent storage
+    # Save the Node ID to storage
     mkdir -p "\$NODE_ID_PERSIST_DIR"
     echo -n "\$node_id" > "\$NODE_ID_PERSIST_FILE"
     echo -e "${GREEN}✅ Node ID saved to persistent storage. Next time, the node will start automatically.${NC}"
@@ -529,7 +499,7 @@ main() {
     esac
 }
 
-# Start main execution (only if not already started automatically by saved ID)
+# Start main execution
 main
 EOF
 chmod +x entrypoint.sh
