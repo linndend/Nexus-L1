@@ -232,7 +232,6 @@ log_info "Installing Docker..."
 if command -v docker >/dev/null 2>&1; then
     log_warn "Docker is already installed, skipping Docker installation"
 else
-    # Try Ubuntu repository first, then official repo as fallback
     install_docker_ubuntu_repo
 fi
 
@@ -342,7 +341,6 @@ NODE_ID_PERSIST_FILE="${NODE_ID_PERSIST_FILE}"
 # Function to handle container shutdown gracefully
 cleanup() {
     echo -e "\n${YELLOW}Shutting down node gracefully...${NC}"
-    # Add any cleanup commands here if needed
     exit 0
 }
 
@@ -370,16 +368,15 @@ chmod +x /usr/local/bin/nexus-network
 if [ -f "\$NODE_ID_PERSIST_FILE" ] && [ -s "\$NODE_ID_PERSIST_FILE" ]; then # -s checks if file is not empty
     SAVED_NODE_ID=\$(cat "\$NODE_ID_PERSIST_FILE")
     echo -e "${GREEN}===============================================${NC}"
-    echo -e "${GREEN}✅ Saved Node ID found: ${SAVED_NODE_ID}${NC}"
+    echo -e "${GREEN}✅ Saved Node ID found: \$SAVED_NODE_ID${NC}"
     echo -e "${GREEN}🚀 Starting node automatically with saved ID...${NC}"
     echo -e "${GREEN}===============================================${NC}"
     echo -e "${YELLOW}Node logs will be displayed below:${NC}"
     echo "----------------------------------------"
-    # Use 'exec' to replace the current shell process with nexus-network
     exec /usr/local/bin/nexus-network start --node-id "\$SAVED_NODE_ID"
 fi
 
-# --- If no saved Node ID, show interactive menu ---
+# --- If no saved Node ID, show interactive setup ---
 echo -e "${YELLOW}⚠️ No saved Node ID found. Starting interactive setup...${NC}"
 sleep 2
 
@@ -391,9 +388,8 @@ show_menu() {
     echo "Select mode to run the node:"
     echo "  1) Run with Wallet Address (for new registration)"
     echo "  2) Run with Node ID (if node is already registered)"
-    echo "  3) Exit"
     echo -e "${BLUE}-----------------------------------${NC}"
-    echo -n "Select an option (1-3): "
+    echo -n "Select an option (1-2): "
 }
 
 validate_wallet_address() {
@@ -424,51 +420,50 @@ run_with_wallet() {
         echo -n "Enter your Wallet Address: "
         read -r wallet_address
         
-        if [ -z "$wallet_address" ]; then
+        if [ -z "\$wallet_address" ]; then
             echo -e "${RED}❌ Wallet Address cannot be empty. Please try again.${NC}"
             continue
         fi
         
-        if ! validate_wallet_address "$wallet_address"; then
+        if ! validate_wallet_address "\$wallet_address"; then
             echo -e "${RED}❌ Invalid wallet address format. Please try again.${NC}"
             continue
         fi
         
-        echo -e "${YELLOW}Wallet Address: ${GREEN}$wallet_address${NC}"
+        echo -e "${YELLOW}Wallet Address: ${GREEN}\$wallet_address${NC}"
         echo -n "Is this correct? (y/n): "
         read -r confirm
         
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        if [[ "\$confirm" =~ ^[Yy]$ ]]; then
             break
         fi
     done
 
-    echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}$wallet_address${NC}"
-    if ! nexus-network register-user --wallet-address "$wallet_address"; then
+    echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}\$wallet_address${NC}"
+    if ! nexus-network register-user --wallet-address "\$wallet_address"; then
         echo -e "${RED}❌ Failed to register user. Please check your wallet address.${NC}"
-        return 1
+        exit 1
     fi
 
     echo -e "\n${BLUE}INFO:${NC} Registering new node...${NC}"
-    # Menangkap output Node ID dari perintah register-node. Pastikan perintah ini mengeluarkan Node ID.
     local NODE_ID
-    NODE_ID=$(nexus-network register-node 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "$NODE_ID" ]; then
+    NODE_ID=\$(nexus-network register-node 2>/dev/null)
+    if [ \$? -ne 0 ] || [ -z "\$NODE_ID" ]; then
         echo -e "${RED}❌ Failed to register node.${NC}"
-        return 1
+        exit 1
     fi
 
     # Simpan Node ID ke penyimpanan persisten
-    mkdir -p "$NODE_ID_PERSIST_DIR"
-    echo -n "$NODE_ID" > "$NODE_ID_PERSIST_FILE"
-    echo -e "${GREEN}✅ Node registered successfully with ID: ${NODE_ID}${NC}"
+    mkdir -p "\$NODE_ID_PERSIST_DIR"
+    echo -n "\$NODE_ID" > "\$NODE_ID_PERSIST_FILE"
+    echo -e "${GREEN}✅ Node registered successfully with ID: \$NODE_ID${NC}"
     sleep 1
 
-    echo -e "\n${BLUE}INFO:${NC} Starting node with Node ID: ${GREEN}$NODE_ID${NC}"
+    echo -e "\n${BLUE}INFO:${NC} Starting node with Node ID: ${GREEN}\$NODE_ID${NC}"
     echo -e "${YELLOW}Node logs will be displayed below:${NC}"
     echo "----------------------------------------"
     
-    exec /usr/local/bin/nexus-network start --node-id "$NODE_ID"
+    exec /usr/local/bin/nexus-network start --node-id "\$NODE_ID"
 }
 
 run_with_node_id() {
@@ -508,36 +503,28 @@ run_with_node_id() {
     echo -e "${YELLOW}Node logs will be displayed below:${NC}"
     echo "----------------------------------------"
     
-    # Use 'exec' to replace the current shell process with nexus-network
     exec /usr/local/bin/nexus-network start --node-id "\$node_id"
 }
 
-# Main execution loop
+# Main execution
 main() {
-    while true; do
-        show_menu
-        read -r MODE
-        
-        case \$MODE in
-            1)
-                run_with_wallet # This will return to menu upon completion
-                ;;
-            2)
-                # If run_with_node_id executes successfully, it will use 'exec' and the script won't return here.
-                # If it fails (e.g., validation), it will return to the menu.
-                run_with_node_id
-                ;;
-            3)
-                echo -e "${YELLOW}Exiting Nexus Node Runner...${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "\n${RED}❌ Invalid option. Please select 1, 2, or 3.${NC}"
-                echo -n "Press Enter to continue..."
-                read -r
-                ;;
-        esac
-    done
+    show_menu
+    read -r MODE
+    
+    case \$MODE in
+        1)
+            run_with_wallet
+            ;;
+        2)
+            run_with_node_id
+            ;;
+        *)
+            echo -e "\n${RED}❌ Invalid option. Please select 1 or 2.${NC}"
+            echo -n "Press Enter to continue..."
+            read -r
+            main # Restart main if invalid input
+            ;;
+    esac
 }
 
 # Start main execution (only if not already started automatically by saved ID)
@@ -554,7 +541,6 @@ if ! docker volume ls -q -f name=^/${VOLUME_NAME}$ | grep -q .; then
 else
     log_success "Docker volume '${VOLUME_NAME}' already exists."
 fi
-
 
 # --- 4. Build Docker Image ---
 echo -e "\n--- ${YELLOW}Step 4: Build Docker Image${NC} ---"
@@ -581,8 +567,9 @@ if docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}\$"; then
 fi
 
 echo -e "\n${BLUE}Launching Nexus Node container '${CONTAINER_NAME}' with persistent volume '${VOLUME_NAME}'...${NC}"
-echo -e "${YELLOW}Anda akan memasuki kontainer. Jika ini adalah jalankan pertama, Anda akan melihat menu.${NC}"
-echo -e "${YELLOW}Jika Node ID sudah tersimpan, node akan otomatis dimulai dan menampilkan log.${NC}"
+echo -e "${YELLOW}Anda akan memasuki kontainer. Jika ini adalah jalankan pertama, Anda akan diminta memasukkan Wallet Address atau Node ID.${NC}"
+echo -e "${YELLOW}Setelah input valid, node akan langsung dimulai dan menampilkan log.${NC}"
+echo -e "${YELLOW}Jika Node ID sudah tersimpan, node akan otomatis dimulai tanpa meminta input lagi.${NC}"
 echo "========================================================"
 
 # Run the container with the defined volume and name, without --rm
