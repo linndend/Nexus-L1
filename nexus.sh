@@ -26,17 +26,62 @@ log_error() {
     exit 1
 }
 
-# Removed spinner() function
-
+# Modified run_command function with better error handling and output
 run_command() {
     local cmd="$1"
     local msg="$2"
+    local log_file="/tmp/nexus_install.log"
+    
     log_info "$msg"
-
-    if eval "$cmd" &> /dev/null; then
+    echo "Command: $cmd" >> "$log_file"
+    
+    # Show progress and capture both stdout and stderr
+    if eval "$cmd" 2>&1 | tee -a "$log_file"; then
         log_success "${msg} completed."
+        return 0
     else
-        log_error "Failed to run: ${msg}"
+        local exit_code=${PIPESTATUS[0]}
+        log_error "Failed to run: ${msg} (Exit code: $exit_code)"
+        echo "Check log file: $log_file"
+        return $exit_code
+    fi
+}
+
+# Function to check if running as root or with sudo access
+check_sudo() {
+    if [ "$EUID" -eq 0 ]; then
+        log_info "Running as root user"
+        return 0
+    elif sudo -n true 2>/dev/null; then
+        log_info "Sudo access available"
+        return 0
+    else
+        log_error "This script requires sudo access. Please run with sudo or as root."
+    fi
+}
+
+# Function to check internet connectivity
+check_internet() {
+    log_info "Checking internet connectivity..."
+    if ping -c 1 google.com &> /dev/null || ping -c 1 8.8.8.8 &> /dev/null; then
+        log_success "Internet connectivity confirmed"
+    else
+        log_error "No internet connection. Please check your network connection."
+    fi
+}
+
+# Function to check available disk space
+check_disk_space() {
+    local required_space=2000000  # 2GB in KB
+    local available_space=$(df / | tail -1 | awk '{print $4}')
+    
+    if [ "$available_space" -lt "$required_space" ]; then
+        log_warn "Low disk space detected. Available: $(($available_space/1024))MB, Recommended: $(($required_space/1024))MB"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_error "Installation cancelled due to insufficient disk space."
+        fi
     fi
 }
 
@@ -46,10 +91,61 @@ echo -e "${YELLOW}    🚀 Nexus Node Automatic Installer 🚀    ${NC}"
 echo -e "${BLUE}==============================================${NC}"
 echo
 
+# Pre-installation checks
+log_info "Performing pre-installation checks..."
+check_sudo
+check_internet
+check_disk_space
+
 # --- 1. Dependency Installation ---
 echo -e "\n--- ${YELLOW}Step 1: System Dependency Installation${NC} ---"
-run_command "sudo apt-get update -y && sudo apt-get upgrade -y" "Updating package list"
-run_command "sudo apt-get install -y curl ca-certificates docker.io libssl-dev build-essential" "Installing curl, docker, and build-essential"
+
+# Fix package cache and handle potential lock issues
+log_info "Checking for package manager locks..."
+if sudo lsof /var/lib/dpkg/lock-frontend &> /dev/null; then
+    log_warn "Package manager is locked. Waiting for other package operations to complete..."
+    while sudo lsof /var/lib/dpkg/lock-frontend &> /dev/null; do
+        sleep 2
+        echo -n "."
+    done
+    echo
+fi
+
+# Update with more verbose output and better error handling
+log_info "Updating package repositories..."
+if ! sudo apt-get update -y; then
+    log_warn "Initial update failed, trying to fix broken packages..."
+    sudo dpkg --configure -a
+    sudo apt-get -f install -y
+    sudo apt-get update -y
+fi
+
+log_info "Upgrading existing packages..."
+sudo apt-get upgrade -y
+
+log_info "Installing required dependencies..."
+# Install packages one by one to identify which one might be causing issues
+PACKAGES=("curl" "ca-certificates" "docker.io" "libssl-dev" "build-essential")
+
+for package in "${PACKAGES[@]}"; do
+    log_info "Installing $package..."
+    if sudo apt-get install -y "$package"; then
+        log_success "$package installation completed"
+    else
+        log_error "Failed to install $package"
+    fi
+done
+
+# Verify Docker installation and start service
+log_info "Starting and enabling Docker service..."
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add current user to docker group (if not root)
+if [ "$EUID" -ne 0 ]; then
+    sudo usermod -aG docker $USER
+    log_warn "Added user to docker group. You may need to log out and back in for changes to take effect."
+fi
 
 # --- 2. Nexus CLI Installation ---
 echo -e "\n--- ${YELLOW}Step 2: Nexus CLI Installation${NC} ---"
@@ -59,19 +155,33 @@ CLI_PATH="$CLI_DIR/bin/nexus-network"
 if [ -f "$CLI_PATH" ]; then
     log_warn "Nexus CLI is already installed. Skipping installation."
 else
+    log_info "Creating Nexus directory..."
+    mkdir -p "$CLI_DIR"
+    
     log_info "Downloading and installing Nexus CLI..."
-
-    if curl -sSfL https://cli.nexus.xyz/ | sh; then
-        log_success "Nexus CLI installed successfully."
-    else
-        log_error "Failed to download or install Nexus CLI."
-    fi
+    
+    # Use more robust download with timeout and retry
+    for attempt in {1..3}; do
+        log_info "Download attempt $attempt/3..."
+        if timeout 300 curl -sSfL --connect-timeout 30 --max-time 300 https://cli.nexus.xyz/ | sh; then
+            log_success "Nexus CLI installed successfully."
+            break
+        else
+            if [ $attempt -eq 3 ]; then
+                log_error "Failed to download Nexus CLI after 3 attempts."
+            else
+                log_warn "Download attempt $attempt failed, retrying in 5 seconds..."
+                sleep 5
+            fi
+        fi
+    done
 fi
 
-# Verify CLI
+# Verify CLI installation
 if [ ! -f "$CLI_PATH" ]; then
     log_error "Nexus CLI installation not found at $CLI_PATH"
 fi
+
 chmod +x "$CLI_PATH"
 cd "$(dirname "$CLI_PATH")" # Change to ~/.nexus/bin for build context
 
@@ -188,7 +298,12 @@ log_success "entrypoint.sh script created successfully."
 
 # --- 4. Build Docker Image ---
 echo -e "\n--- ${YELLOW}Step 4: Build Docker Image${NC} ---"
-run_command "docker build -t nexus-node ." "Building 'nexus-node' image"
+log_info "Building 'nexus-node' image (this may take a few minutes)..."
+if docker build -t nexus-node .; then
+    log_success "Docker image built successfully"
+else
+    log_error "Failed to build Docker image"
+fi
 
 # --- 5. Done ---
 echo -e "\n${GREEN}======================================================${NC}"
@@ -204,3 +319,5 @@ echo "Note:"
 echo " - The ${BLUE}-it${NC} option will open an interactive terminal to choose the mode."
 echo " - The ${BLUE}--rm${NC} option will automatically remove the container after it stops."
 echo "   (If you wish to persist node data, consider using Docker Volumes)."
+echo
+echo "Log file location: ${YELLOW}/tmp/nexus_install.log${NC}"
