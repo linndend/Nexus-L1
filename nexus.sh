@@ -324,6 +324,23 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Function to handle container shutdown gracefully
+cleanup() {
+    echo -e "\n${YELLOW}Shutting down node gracefully...${NC}"
+    # Add any cleanup commands here if needed
+    exit 0
+}
+
+# Trap signals for graceful shutdown
+trap cleanup SIGTERM SIGINT SIGQUIT
+
+# Ensure we have a proper TTY for interactive input
+if [ ! -t 0 ]; then
+    echo -e "${RED}ERROR: This container requires interactive mode.${NC}"
+    echo "Please run with: docker run -it --rm nexus-node"
+    exit 1
+fi
+
 show_menu() {
     clear
     echo -e "${BLUE}===================================${NC}"
@@ -334,66 +351,188 @@ show_menu() {
     echo "  2) Run with Node ID (if node is already registered)"
     echo "  3) Exit"
     echo -e "${BLUE}-----------------------------------${NC}"
+    echo -n "Select an option (1-3): "
+}
+
+validate_wallet_address() {
+    local wallet="$1"
+    # Basic validation for common wallet address formats
+    if [[ ${#wallet} -lt 10 ]]; then
+        return 1
+    elif [[ ! "$wallet" =~ ^[a-zA-Z0-9] ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_node_id() {
+    local node_id="$1"
+    # Basic validation for node ID
+    if [[ ${#node_id} -lt 5 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 run_with_wallet() {
     local wallet_address
+    echo -e "\n${BLUE}=== Running with Wallet Address ===${NC}"
+    
     while true; do
-        read -p "Enter your Wallet Address: " wallet_address
-        if [ -n "$wallet_address" ]; then
+        echo -n "Enter your Wallet Address: "
+        read -r wallet_address
+        
+        if [ -z "$wallet_address" ]; then
+            echo -e "${RED}❌ Wallet Address cannot be empty. Please try again.${NC}"
+            continue
+        fi
+        
+        if ! validate_wallet_address "$wallet_address"; then
+            echo -e "${RED}❌ Invalid wallet address format. Please try again.${NC}"
+            continue
+        fi
+        
+        echo -e "${YELLOW}Wallet Address: ${GREEN}$wallet_address${NC}"
+        echo -n "Is this correct? (y/n): "
+        read -r confirm
+        
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
             break
-        else
-            echo -e "${RED}Wallet Address cannot be empty. Please try again.${NC}"
         fi
     done
 
     echo -e "\n${BLUE}INFO:${NC} Registering user with wallet: ${GREEN}$wallet_address${NC}"
-    nexus-network register-user --wallet-address "$wallet_address"
+    if ! nexus-network register-user --wallet-address "$wallet_address"; then
+        echo -e "${RED}❌ Failed to register user. Please check your wallet address.${NC}"
+        return 1
+    fi
 
     echo -e "\n${BLUE}INFO:${NC} Registering new node..."
-    nexus-network register-node
+    if ! nexus-network register-node; then
+        echo -e "${RED}❌ Failed to register node.${NC}"
+        return 1
+    fi
 
-    echo -e "\n${BLUE}INFO:${NC} Starting node... Logs will be displayed below."
+    echo -e "\n${BLUE}INFO:${NC} Starting node... Press Ctrl+C to stop."
+    echo -e "${YELLOW}Node logs will be displayed below:${NC}"
+    echo "----------------------------------------"
+    
+    # Run the node and keep container alive
     nexus-network start
 }
 
 run_with_node_id() {
     local node_id
+    echo -e "\n${BLUE}=== Running with Node ID ===${NC}"
+    
     while true; do
-        read -p "Enter your Node ID: " node_id
-        if [ -n "$node_id" ]; then
+        echo -n "Enter your Node ID: "
+        read -r node_id
+        
+        if [ -z "$node_id" ]; then
+            echo -e "${RED}❌ Node ID cannot be empty. Please try again.${NC}"
+            continue
+        fi
+        
+        if ! validate_node_id "$node_id"; then
+            echo -e "${RED}❌ Invalid Node ID format. Please try again.${NC}"
+            continue
+        fi
+        
+        echo -e "${YELLOW}Node ID: ${GREEN}$node_id${NC}"
+        echo -n "Is this correct? (y/n): "
+        read -r confirm
+        
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
             break
-        else
-            echo -e "${RED}Node ID cannot be empty. Please try again.${NC}"
         fi
     done
 
-    echo -e "\n${BLUE}INFO:${NC} Starting node with ID: ${GREEN}$node_id${NC}... Logs will be displayed below."
+    echo -e "\n${BLUE}INFO:${NC} Starting node with ID: ${GREEN}$node_id${NC}"
+    echo -e "${YELLOW}Node logs will be displayed below:${NC}"
+    echo "----------------------------------------"
+    
+    # Run the node and keep container alive
     nexus-network start --node-id "$node_id"
 }
 
-while true; do
-    show_menu
-    read -p "Select an option (1-3): " MODE
-    case $MODE in
-        1)
-            run_with_wallet
-            break
-            ;;
-        2)
-            run_with_node_id
-            break
-            ;;
-        3)
-            echo "Exiting script."
-            exit 0
-            ;;
-        *)
-            echo -e "\n${RED}Invalid option. Press [Enter] to try again.${NC}"
-            read -n 1
-            ;;
-    esac
-done
+show_instructions() {
+    echo -e "\n${BLUE}📋 INSTRUCTIONS:${NC}"
+    echo "• This container will keep running until you stop it"
+    echo "• To stop the node: Press Ctrl+C or run 'docker stop <container_id>'"
+    echo "• To run in background: Use 'docker run -d -it nexus-node'"
+    echo "• To view logs: Use 'docker logs <container_id>'"
+    echo ""
+}
+
+# Main execution loop
+main() {
+    while true; do
+        show_menu
+        read -r MODE
+        
+        case $MODE in
+            1)
+                if run_with_wallet; then
+                    echo -e "\n${GREEN}✅ Node started successfully with wallet address!${NC}"
+                    show_instructions
+                    # Keep container running
+                    while true; do
+                        sleep 30
+                        if ! pgrep -f "nexus-network" > /dev/null; then
+                            echo -e "${YELLOW}⚠️ Node process stopped. Restarting...${NC}"
+                            nexus-network start &
+                        fi
+                    done
+                else
+                    echo -e "${RED}❌ Failed to start node with wallet address.${NC}"
+                    echo -n "Press Enter to return to menu..."
+                    read -r
+                fi
+                ;;
+            2)
+                if run_with_node_id; then
+                    echo -e "\n${GREEN}✅ Node started successfully with Node ID!${NC}"
+                    show_instructions
+                    # Keep container running
+                    while true; do
+                        sleep 30
+                        if ! pgrep -f "nexus-network" > /dev/null; then
+                            echo -e "${YELLOW}⚠️ Node process stopped. Restarting...${NC}"
+                            nexus-network start &
+                        fi
+                    done
+                else
+                    echo -e "${RED}❌ Failed to start node with Node ID.${NC}"
+                    echo -n "Press Enter to return to menu..."
+                    read -r
+                fi
+                ;;
+            3)
+                echo -e "${YELLOW}Exiting Nexus Node Runner...${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "\n${RED}❌ Invalid option. Please select 1, 2, or 3.${NC}"
+                echo -n "Press Enter to continue..."
+                read -r
+                ;;
+        esac
+    done
+}
+
+# Check if nexus-network binary exists
+if [ ! -f "/usr/local/bin/nexus-network" ]; then
+    echo -e "${RED}❌ ERROR: nexus-network binary not found!${NC}"
+    echo "Please ensure the Docker image was built correctly."
+    exit 1
+fi
+
+# Make sure binary is executable
+chmod +x /usr/local/bin/nexus-network
+
+# Start main execution
+main
 EOF
 chmod +x entrypoint.sh
 log_success "entrypoint.sh script created successfully."
